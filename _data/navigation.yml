@@ -1,0 +1,11 @@
+- name: Home
+  link: /
+
+- name: Posts
+  link: /blog
+
+- name: About
+  link: https://josejg.com
+
+- name: GitHub
+  link: https://github.com/jjgo
