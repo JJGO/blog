@@ -1,4 +1,4 @@
-@media (prefers-color-scheme: dark) {
+/* @media (prefers-color-scheme: dark) { */
 
 .highlight table td {
   padding: 5px;
@@ -135,4 +135,4 @@ code {
   /* color: #d3869b; */
 }
 
-}
+/* } */
