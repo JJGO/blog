@@ -4,7 +4,16 @@ plugins:
 
 # SEO Stuff
 author: Jose Javier
-description: Pseudorandom musings on programming, machine learning and puzzles
+description: Random musings on programming, machine learning and computational puzzles
+markdown: kramdown
+highlighter: rouge
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge
+  syntax_highlighter_opts:
+    default_lang: html
+    css_class: "syntax"
+
 lang: en
 locale: en_US
 url: "https://blog.josejg.com"

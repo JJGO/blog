@@ -1,13 +1,14 @@
 ---
-title: Simple Jekyll - A Jekyll site powered by Simple.css
-header: Simple Jekyll {}
-description: A Jekyll site powered by Simple.css
-permalink: /
 layout: default
+title: Blog | Jose Javier Gonzalez Ortiz
+header: Blog
+description: Random musings on programming, machine learning and computational puzzles
+permalink: /
 ---
 
-# Welcome to Simple Jekyll
+{% for post in site.posts %}
 
-This is a simple webpage that has been handbuilt by [Kev Quirk](https://kevq.uk) using the Jekyll static site generator and [Simple.css](https://simplecss.org).
-
-Please feel free to take a look around. If you're interested, you can find the source code for this site [on GitHub](https://github.com/kevquirk/jekyll-simple.css).
+  <p><a href="{{ post.url }}">{{ post.title }}</a><br>
+  {{ post.description }}<br>
+  📅 {{ post.date | date_to_string }}</p>
+{% endfor %}

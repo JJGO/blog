@@ -1,11 +1,14 @@
-- name: Home
+- name: Blog
   link: /
 
-- name: Posts
-  link: /blog
+# - name: Posts
+#   link: /blog
 
 - name: About
   link: https://josejg.com
-
-- name: GitHub
-  link: https://github.com/jjgo
+# - name: <img class="icon" src="/assets/images/rss.svg" alt="RSS">
+#   link: /feed.xml
+# - name: GitHub
+#   link: https://github.com/jjgo
+- name: RSS
+  link: /feed.xml

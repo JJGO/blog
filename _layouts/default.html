@@ -1,16 +1,17 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en-US">
   <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="icon" href="https://blog.josejg.com/assets/images/favicon.png" />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="/assets/images/favicon.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/assets/images/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/assets/images/favicon-16x16.png">
     <title>{{ page.title }}</title>
     <meta name="description" content="{{ page.description }}" />
-    <link rel="stylesheet" href="https://cdn.simplecss.org/simple.min.css">
-    <!-- <link rel="stylesheet" href="https://cdn.kevq.uk/assets/css/custom.css"> -->
+    <link rel="stylesheet" href="/assets/css/simple.css" />
+    <link rel="stylesheet" href="/assets/css/syntax.css" />
   </head>
   <body>
-
     <header>
       <h1>{{ page.header }}</h1>
       <p>{{ page.description }}</p>
@@ -18,13 +19,13 @@
       {% include navigation.html %}
     </header>
 
-    <main>
-      {{ content }}
-    </main>
+    <main>{{ content }}</main>
 
     <footer>
-      <p>This site was created by <a href="https://josejg.com">Jose Javier Gonzalez Ortiz</a> and was made using <a href="https://jekyllrb.com">Jekyll</a> and <a href="https://simplecss.org">Simple.css</a>.</p>
+      <p>
+      © 2021 <a href="https://josejg.com">Jose Javier Gonzalez Ortiz</a>.
+      Subscribe <a href="/feed.xml">via RSS</a>
+      </p>
     </footer>
-
   </body>
 </html>
