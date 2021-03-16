@@ -2,7 +2,7 @@
 title: Debugging by Pretty Printing
 header: Debugging by Pretty Printing
 description: Debugging distributed systems is a hard task. We can make this task easier by making use of good logging practices and taking advantage of Terminal User Interface tools that present the logs in a easier to digest way.
-permalink: /debugging-raft/
+permalink: /debugging-pretty/
 layout: post
 ---
 
