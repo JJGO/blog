@@ -6,25 +6,25 @@ permalink: /debugging-pretty/
 layout: post
 ---
 
-This semester I'm a Teaching Assistant for MIT's [6.824 Distributed Systems](https://pdos.csail.mit.edu/6.824/) class. The class requires students to iteratively implement Raft, a distributed consensus protocol. This is a very challenging task, despite Raft's claim to fame as an "easier to understand Paxos", it still is a complex distributed system that is quite hard to get right even after several (or many) attempts.
-When I took 6.824, I noticed that the bottleneck for finishing the labs never was doing the bulk of the required implementation for the corresponding lab. For the most part, the time consuming parts were: 1) designing the logic of each part, and mostly 2) getting failed runs and parsing through the logs to understand how the system failed and what went wrong.
+This semester I'm a Teaching Assistant for MIT's [6.824 Distributed Systems](https://pdos.csail.mit.edu/6.824/) class. The class requires students to iteratively implement Raft, a distributed consensus protocol. This is a very challenging task, as despite Raft's claim to fame as an "easier to understand Paxos", it still is a complex distributed system that is quite hard to get right even after several (or many) attempts.
+When I took 6.824, I noticed that the bottleneck for finishing the labs never was doing the bulk of the required implementation for the corresponding lab. Overall, the time-consuming bits were: 1) designing the logic for each part, and mostly 2) getting the failed runs and parsing through the logs to understand how the system failed and what went wrong.
 
-In this post, I won't over common pitfalls or how a Raft implementation usually goes wrong, if you are interested in that, check out the fantastic [Students' Guide to Raft](https://thesquareplanet.com/blog/students-guide-to-raft/). What I'll cover is how to write tools to make your life as a debugger of distributed systems easier. We will see how to build these terminal based tools from the ground up, ending up with a debugging suite that will make you more efficient at detecting, understating and fixing bugs for the 6.824 labs. All the labs in 6.824 are debugged in the same way so it's probably a good idea to invest some time in making getting and parsing logs a more amenable task.
+In this post, I won't over common pitfalls or how a Raft implementation usually goes wrong, if you are interested in that, check out the fantastic [Students' Guide to Raft](https://thesquareplanet.com/blog/students-guide-to-raft/). What I'll cover is how to write tools to make your life as a distributed systems debugger easier. We will see how to build these terminal-based tools from the ground up, ending with a debugging suite that will make you more efficient at detecting, understanding and fixing bugs for the 6.824 labs. All the labs in 6.824 are debugged in the same way, so it's probably a good idea to invest some time in making collecting and parsing logs a more pleasant task.
 
 ## Debugging distributed code hits different
 
-Debugging distributed systems is a task most students taking 6.824 have not dealt with before this class, and it's fundamentally different from other forms of debugging. There are no easily accessible debuggers like `gdb` or `pdb` that let you run your code step by step. And traditional _printf debugging_ also falls short since there can be a large amount of routines running (and thus printing) in parallel.
-In traditional systems, debugging via print statements is fairly straightforward since there is often just a single thread of execution and one can quickly reason about what's going on.
-With distributed systems like the ones in the 6.824 labs, there will be N machines each of which is concurrently executing several threads. For instance, in the Raft labs, there are N raft peers executing in parallel as if they were in separate machines. For each one of these peers there will be multiple goroutines executing in parallel (commonly one or two timers, an applier and some amount of RPC and RPC reply handlers), leading to large amounts of concurrency. While adding print statements is easy, parsing through them can be quite tricky, specially as the complexity of the labs slowly builds up week after week.
+Debugging distributed systems is a task many students have not dealt with before taking 6.824, and it's fundamentally different from other forms of debugging. There are no easily accessible debuggers like `gdb` or `pdb` that let you run your code step by step. And traditional _printf debugging_ also falls short since there can be a large amount of routines running (and thus, printing) in parallel.
+In traditional systems, debugging via print statements is fairly straightforward, since there is often a single thread of execution and one can quickly reason about what is going on.
+With distributed systems like the ones in the 6.824 labs, there are N machines and each of them is concurrently executing several threads. For instance, in the Raft labs there are N raft peers executing in parallel as if they were in separate machines. For each one of these peers there will be multiple goroutines executing in parallel (commonly one or two timers, an applier and some amount of RPC and RPC reply handlers), leading to large amounts of concurrency. While adding print statements is easy, parsing through them can be quite tricky, specially as the complexity of the labs slowly builds up week after week.
 
-All that said, going through your logs to identify the faults in your logic is the best bang for your ~~buck~~ pset hour. Staring at your code or repeatedly tweaking different parts might help in the short term but hard bugs will require a more careful analysis.
+All that said, going through your logs to identify the faults in your logic is the best bang for your ~~buck~~ pset hour. Staring at your code or repeatedly tweaking different parts might help in the short term, but hard bugs will require a more careful analysis.
 
-Moreover, in a system like Raft not only there are multiple threads printing output at once, but they will be printing about very heterogeneous events such as: timer resets, log operations, elections, crash recovery or communication with the replicated state machine. Crucially, different types of events will happen with different frequencies which can lead to overly verbose logs if they are not trimmed in some way.
-Therefore, ideally we would like to know **who** is printing each line and **what topic** the message is related to. We will design ways of encoding those pieces of information visually,
+Moreover, in a system like Raft not only are multiple threads printing output at once, but they will be printing about very heterogeneous events such as: timer resets, log operations, elections, crash recovery or communication with the replicated state machine. Crucially, different types of events will occur with different frequencies, which can lead to overly verbose logs if they are not trimmed in some way.
+Therefore, we would ideally like to know **who** is printing each line and **what topic** the message is related to, and we will design ways of encoding those pieces of information visually.
 
 ### The Go side
 
-While most of the tooling will be done through python scripts, there needs to be some cooperation from the Go side to ensure that we feed the information to downstream scripts in a easy to parse way.
+While most of the tooling will be done using Python scripts, there needs to be some cooperation from the Go side to ensure that we feed the information to downstream scripts in a way that is easy to parse.
 
 **Toggling the output verbosity**.
 A minor quality of life improvement that I implemented is the ability to toggle log verbosity without having to edit go code at all. This will make it easier later on for the automated script runner to control verbosity.
@@ -46,7 +46,7 @@ func getVerbosity() int {
 }
 ```
 
-**Logging with topics**. I decided to fundamentally alter my _printf_ function of choice to accept as a first argument a _topic_ that encodes what category the message contains. This first argument is in essence a string but to make code easier to refactor (and because I dislike typing quotes), I declared the topic constants. The topics relate to different parts of the implementation and by making them fine grained we will able to filter and search for them more easily and even highlight them with different colors later on.
+**Logging with topics**. I decided to fundamentally alter my _printf_ function of choice to accept as a first argument a _topic_ that encodes what category the message contains. This first argument is in essence a string, but to make code easier to refactor (and because I dislike typing quotes), I declared the topic constants. The topics relate to different parts of the implementation, and by making them fine grained we will able to filter and search for them more easily and even highlight them with different colors later on.
 
 ```go
 type logTopic string
@@ -70,7 +70,7 @@ const (
 )
 ```
 
-**The print function**. The last moving piece on the Go side is the actual print function we will use to dump output. I called mine `Debug` and it prints the message along with the topic and the amount of milliseconds since the start of the run. I disable all datetime logging since that information is quite redundant (all tests must pass in a couple of minutes at most). Moreover, printing just the milliseconds renders useful when checking that timer related events happen with the expected frequency.
+**The print function**. The last moving piece on the Go side is the actual print function we will use to dump output. I called mine `Debug` and it prints the message along with the topic and the amount of milliseconds since the start of the run. I disable all datetime logging since that information is quite redundant (all tests must pass in at most a couple of minutes). Moreover, printing just the milliseconds renders useful when checking that timer-related events happen with the expected frequency.
 
 ```go
 var debugStart time.Time
@@ -127,7 +127,7 @@ So if we now run with verbosity (e.g. `VERBOSE=1 go test -run TestBackup2B`) the
 ...
 ```
 
-So for every line the first three columns are indicating us: when the event happened, what category it's related to and which server is the one printing the message. The rest is left as free form.
+So for every line, the first three columns indicate: when the event happened, what category it is related to and which server is printing the message. The rest is left as free form.
 
 ### Prettifying the Logs
 
@@ -139,13 +139,13 @@ Humans are visual creatures so it's a good idea to make use of visual tools like
 
 However, if you have ever tried pretty printing from the terminal you will probably have realized by now that it often feels like a chore and you end up writing very messy code. Here is where [Rich](https://github.com/willmcgugan/rich) comes to the rescue.
 According to their description "Rich is a Python library for rich text and beautiful formatting in the terminal." and if you quickly browse their features you will probably be amazed at the multitude of features that Rich has to offer.
-I won't go into a terrible amount of detail, but I highly encourage you to check out Rich if you build terminal python scripts.
+I won't go into a terrible amount of detail, but I highly encourage you to check out Rich if you build terminal Python scripts.
 
 For our case, Rich provides an intuitive API for dealing with printing colored output and formatting text into N columns.
 For instance, `rich.print("[red]This is red[/red]")` will print that enclosed text to the terminal using [ANSI escape codes](https://en.wikipedia.org/wiki/ANSI_escape_code), rendering the text red. When compared to its bash equivalent of doing `echo -e "\033[91mThis is red\e[0m` which looks more like nonsensical characters, the choice it's obvious.
 
 Using the rich primitives we can easily build our pretty printer for logs. The relevant snippet is below. Implementation is mostly commented, highlighting the different features of the script which include: topic filtering, topic-based colorization and column printing.
-The full script can be found [here](https://gist.github.com/JJGO/e64c0e8aedb5d464b5f79d3b12197338). Setting up a python environment with the required packages and adding the script to your `PATH` is left as an exercise for the reader.
+The full script can be found [here](https://gist.github.com/JJGO/e64c0e8aedb5d464b5f79d3b12197338). Setting up a Python environment with the required packages and adding the script to your `PATH` is left as an exercise for the reader.
 
 ```python
 # [...] # Some boring imports
@@ -355,7 +355,7 @@ Once it's done, we get a report of how many failed runs there were and the mean 
 
 ### Now go build your own
 
-I hope this overview was helpful and provided the background and illustrative examples for the building blocks required to implement beautiful yet functional terminal tools for debugging distributed code. Huge props to the developers of Rich, without it, building these tools would have been an order of magnitude more time consuming.
+I hope this overview was helpful and provided the background and illustrative examples for the building blocks required to implement beautiful yet functional terminal tools for debugging distributed code. Huge props to the developers of Rich, without it, building these tools would have been an order of magnitude more time-consuming.
 
 ### Disclaimer: Truecolor Support
 
