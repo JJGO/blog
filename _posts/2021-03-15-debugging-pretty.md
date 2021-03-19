@@ -1,34 +1,35 @@
 ---
 title: Debugging by Pretty Printing
 header: Debugging by Pretty Printing
-description: Debugging distributed systems is a hard task. We can make this task easier by making use of good logging practices and taking advantage of Terminal User Interface tools that present the logs in a easier to digest way.
+description: Debugging distributed systems is a hard task. We can make this task easier by making use of good logging practices and taking advantage of Terminal User Interface tools, making parsing distributed logs effortless.
 permalink: /debugging-pretty/
 layout: post
 ---
 
-This semester I'm a Teaching Assistant for MIT's [6.824 Distributed Systems](https://pdos.csail.mit.edu/6.824/) class. The class requires students to iteratively implement Raft, a distributed consensus protocol. This is a very challenging task, as despite Raft's claim to fame as an "easier to understand Paxos", it still is a complex distributed system that is quite hard to get right even after several (or many) attempts.
-When I took 6.824, I noticed that the bottleneck for finishing the labs never was doing the bulk of the required implementation for the corresponding lab. Overall, the time-consuming bits were: 1) designing the logic for each part, and mostly 2) getting the failed runs and parsing through the logs to understand how the system failed and what went wrong.
+This semester I'm a Teaching Assistant for MIT's [6.824 Distributed Systems](https://pdos.csail.mit.edu/6.824/) class. The class requires students to iteratively implement Raft, a distributed consensus protocol. This is a very challenging task, as despite Raft's claim to fame as an _"easier to understand Paxos"_, Raft is a complex distributed system that is quite hard to get right, even after several (or many) attempts.
+When I took 6.824, I noticed that the bottleneck for finishing the labs never was doing the bulk of the required implementation for the corresponding lab. Overall, what consumed most of my time was getting the failed runs and parsing through the logs to understand how the system failed and what went wrong.
 
-In this post, I won't over common pitfalls or how a Raft implementation usually goes wrong, if you are interested in that, check out the fantastic [Students' Guide to Raft](https://thesquareplanet.com/blog/students-guide-to-raft/). What I'll cover is how to write tools to make your life as a distributed systems debugger easier. We will see how to build these terminal-based tools from the ground up, ending with a debugging suite that will make you more efficient at detecting, understanding and fixing bugs for the 6.824 labs. All the labs in 6.824 are debugged in the same way, so it's probably a good idea to invest some time in making collecting and parsing logs a more pleasant task.
+In this post, I won't go over common pitfalls or how a Raft implementation usually goes wrong, if you are interested in that, check out the fantastic [Students' Guide to Raft](https://thesquareplanet.com/blog/students-guide-to-raft/). What I'll cover is how to write tools to make your life as a distributed systems debugger easier. We will see how to build these terminal-based tools from the ground up, ending with a debugging suite that will make you more efficient at detecting, understanding and fixing bugs for the 6.824 labs. All the labs in 6.824 are debugged in the same way, so it's probably a good idea to invest some time in making collecting and parsing logs less laborious.
 
 ## Debugging distributed code hits different
 
 Debugging distributed systems is a task many students have not dealt with before taking 6.824, and it's fundamentally different from other forms of debugging. There are no easily accessible debuggers like `gdb` or `pdb` that let you run your code step by step. And traditional _printf debugging_ also falls short since there can be a large amount of routines running (and thus, printing) in parallel.
 In traditional systems, debugging via print statements is fairly straightforward, since there is often a single thread of execution and one can quickly reason about what is going on.
-With distributed systems like the ones in the 6.824 labs, there are N machines and each of them is concurrently executing several threads. For instance, in the Raft labs there are N raft peers executing in parallel as if they were in separate machines. For each one of these peers there will be multiple goroutines executing in parallel (commonly one or two timers, an applier and some amount of RPC and RPC reply handlers), leading to large amounts of concurrency. While adding print statements is easy, parsing through them can be quite tricky, specially as the complexity of the labs slowly builds up week after week.
 
+With distributed systems like the ones in the 6.824 labs, there are N machines and each of them is concurrently executing several threads. For instance, in the Raft labs there are N raft peers executing in parallel as if they were in separate machines. For each one of these peers there will be multiple goroutines executing in parallel (commonly one or two timers, an applier and some amount of RPC and RPC reply handlers), leading to large amounts of concurrency. While adding print statements is easy, parsing through them can be quite tricky, specially as the complexity of the labs slowly builds up week after week.
 All that said, going through your logs to identify the faults in your logic is the best bang for your ~~buck~~ pset hour. Staring at your code or repeatedly tweaking different parts might help in the short term, but hard bugs will require a more careful analysis.
 
-Moreover, in a system like Raft not only are multiple threads printing output at once, but they will be printing about very heterogeneous events such as: timer resets, log operations, elections, crash recovery or communication with the replicated state machine. Crucially, different types of events will occur with different frequencies, which can lead to overly verbose logs if they are not trimmed in some way.
-Therefore, we would ideally like to know **who** is printing each line and **what topic** the message is related to, and we will design ways of encoding those pieces of information visually.
+Moreover, in a system like Raft not only there are multiple threads printing output at once, but they will be printing about very heterogeneous events such as: timer resets, log operations, elections, crash recovery or communication with the replicated state machine. Crucially, different types of events will occur with different frequencies, which can lead to overly verbose logs if they are not trimmed in some way.
+
+Therefore, we would ideally like to know **who** is printing each line and **what topic** the message is related to. Our goal is to design a way of encoding those pieces of information visually. TL;DR: We will make Go print a boring log with a specific format and then make use of the [Rich](https://github.com/willmcgugan/rich) Python library to abstract away the ugly complexity of printing beautifully formatted terminal output.
 
 ### The Go side
 
 While most of the tooling will be done using Python scripts, there needs to be some cooperation from the Go side to ensure that we feed the information to downstream scripts in a way that is easy to parse.
 
 **Toggling the output verbosity**.
-A minor quality of life improvement that I implemented is the ability to toggle log verbosity without having to edit go code at all. This will make it easier later on for the automated script runner to control verbosity.
-Since the 6.824 tests use `go test`, we can't use command line arguments directly. However, what we can use are environment variables. The following piece of code will access the `VERBOSE`
+A minor quality of life improvement that I implemented is the ability to toggle log verbosity without having to edit go code at all. Later on, this will also make it easier for our automated script runner to control verbosity.
+Since the 6.824 tests use `go test`, we can't use command line arguments directly. However, what we can use are [environment variables](https://www.wikiwand.com/en/Environment_variable). The following piece of code will access the `VERBOSE` environment variable to decide whether verbose logs are needed.
 
 ```go
 // Retrieve the verbosity level from an environment variable
@@ -46,7 +47,7 @@ func getVerbosity() int {
 }
 ```
 
-**Logging with topics**. I decided to fundamentally alter my _printf_ function of choice to accept as a first argument a _topic_ that encodes what category the message contains. This first argument is in essence a string, but to make code easier to refactor (and because I dislike typing quotes), I declared the topic constants. The topics relate to different parts of the implementation, and by making them fine grained we will able to filter and search for them more easily and even highlight them with different colors later on.
+**Logging with topics**. I decided to fundamentally alter my printf function of choice to accept as a first argument a _topic_ that encodes what category the message belongs to. This first argument is in essence a string, but to make code easier to refactor (and because I dislike typing quotes), I declared the topic as constants. The topics relate to different parts of the implementation, and by making them fine grained we will able to filter, search and even highlight them with different colors.
 
 ```go
 type logTopic string
@@ -127,7 +128,7 @@ So if we now run with verbosity (e.g. `VERBOSE=1 go test -run TestBackup2B`) the
 ...
 ```
 
-So for every line, the first three columns indicate: when the event happened, what category it is related to and which server is printing the message. The rest is left as free form.
+So for every line, the first three columns indicate: **when** the event happened, **what topic** it's related to and **which server** is printing the message. The rest is left as free form.
 
 ### Prettifying the Logs
 
@@ -135,21 +136,22 @@ So far, the output logs are still looking rather bleak. They seem functional but
 
 While Go is great language choice for the 6.824 labs, it is not as ergonomic as Python when it comes to quick and dirty scripting. A major reason why I decided to go with Python are [Rich](https://github.com/willmcgugan/rich) and [Typer](https://github.com/tiangolo/typer), a couple of nifty libraries that make writing Terminal User Interface (TUI) applications a breeze.
 
-Humans are visual creatures so it's a good idea to make use of visual tools like colors or spatial location to encode different types of information. Reducing the time to parse who said what will drastically improve your debugging efficiency since you will be able to devote more headspace to the faulty logic at play and less to decode your format.
-
+Humans are visual creatures so it's a good idea to make use of visual tools like colors or columns to encode different types of information. Reducing the time to parse who said what will drastically improve your debugging efficiency.
 However, if you have ever tried pretty printing from the terminal you will probably have realized by now that it often feels like a chore and you end up writing very messy code. Here is where [Rich](https://github.com/willmcgugan/rich) comes to the rescue.
-According to their description "Rich is a Python library for rich text and beautiful formatting in the terminal." and if you quickly browse their features you will probably be amazed at the multitude of features that Rich has to offer.
-I won't go into a terrible amount of detail, but I highly encourage you to check out Rich if you build terminal Python scripts.
+According to their description _"Rich is a Python library for rich text and beautiful formatting in the terminal"_. If you quickly browse their docs you will probably be amazed at the multitude of features that Rich has to offer.
+I won't go into a terrible amount of detail, but I highly encourage you to check out Rich if you build terminal Python scripts that need to present structured or interactive output.
 
 For our case, Rich provides an intuitive API for dealing with printing colored output and formatting text into N columns.
 For instance, `rich.print("[red]This is red[/red]")` will print that enclosed text to the terminal using [ANSI escape codes](https://en.wikipedia.org/wiki/ANSI_escape_code), rendering the text red. When compared to its bash equivalent of doing `echo -e "\033[91mThis is red\e[0m` which looks more like nonsensical characters, the choice it's obvious.
 
-Using the rich primitives we can easily build our pretty printer for logs. The relevant snippet is below. Implementation is mostly commented, highlighting the different features of the script which include: topic filtering, topic-based colorization and column printing.
+Using Rich's primitives we can easily build our pretty printer for logs. The relevant snippet is below. Implementation is mostly commented, highlighting the different features of the script which include: topic filtering, topic-based colorization and column printing.
 The full script can be found [here](https://gist.github.com/JJGO/e64c0e8aedb5d464b5f79d3b12197338). Setting up a Python environment with the required packages and adding the script to your `PATH` is left as an exercise for the reader.
 
 ```python
 # [...] # Some boring imports
 # Mapping from topics to colors
+# See the disclaimer at the end of the post if you
+# want to use all RGB colors
 TOPICS = {
     "TIMR": "bright_black",
     "VOTE": "bright_cyan",
@@ -193,7 +195,7 @@ for line in input_:
 
         msg = " ".join(msg)
 
-        # Debug calls from the test suite aren't associated with
+        # Debug() calls from the test suite aren't associated with
         # any particular peer. Otherwise we can treat second column
         # as peer id
         if topic != "TEST":
@@ -252,26 +254,24 @@ Since a picture is worth a thousand words, below is a comparison between a sampl
 
 ![](/assets/images/debugging-raft/raw.png)
 
-After prettyfying we've got a quite simple story:
-S0 becomes candidate, S1 and S2 update terms vote for S0, leading to a majority. S0 then starts sending and receiving heartbeats.
+After prettifying we've got a quite simple story:
+S0 becomes candidate, S1 and S2 update terms and vote for S0. S0 converts to leader and starts sending and receiving heartbeats.
 
 ![](/assets/images/debugging-raft/colored.png)
 
-
-Note, since some tests might produce thousands of lines of logs, it's a good idea to use some sort of pager strategy to quickly navigate them. I am a happy `tmux` user and that's what how I went about it. I do have in my `.tmux.conf` a history override (`set -g history-limit 100000`) so I have enough scrollback. Using `less` won't work because it'll mess with Rich ability to print colors and detect console width. You might try Rich's `console.pager()` contextmanager although from cursory exploration I had to wait until the whole output was there for pagination to start so YMMV.
+Note, since some tests might produce thousands of lines of logs, it's a good idea to use some sort of pager strategy to quickly navigate them. I am a happy `tmux` user and that's what how I went about it. I do have in my `.tmux.conf` a history override (`set -g history-limit 100000`) so I have enough scrollback. Using `less` won't work because it'll mess with Rich's ability to print colors and detect console width. You might try Rich's `console.pager()` context manager although from cursory exploration I had to wait until the whole output was there for pagination to start.
 
 ### Capturing Rare Failures
 
-We now have a wonderful tool for examining logs. However logs for failed runs are sometimes hard to come by. What I'm referring to is the fact that as you progressively fix mistakes in your distributed system labs implementations, bugs will become rarer and it can become frustrating when all tests pass except for a specific one that only fails every fifty or hundred runs.
-When dealing with sporadic/rare issues the best approach is to log aggressively (which we are already doing) and dump failed runs to a file. It's easier to filter out irrelevant parts from an overly verbose log than having to wait for the error to appear again after N runs. Sometimes it's also helpful to have sucessful runs' logs as well so you can compare at what point they start to diverge.
+We now have a wonderful tool for examining logs. However logs for failed runs are sometimes hard to come by. What I'm referring to is the fact that as you progressively fix mistakes in your distributed system implementations, bugs will become rarer and it can become frustrating when all tests pass except for a specific one that only fails every fifty or hundred runs.
 
-Ideally we would like a script that can do the following:
+Ideally we would like a script that does the following:
 
-- Execute N runs of a series of tests
-- Saved failed runs for later inspection
-- Run tests in parallel. This will speed up tests significantly and it also sometimes helps by introducing more concurrency which often makes rare interleavings more frequent. However, do take care not to starve your CPU.
+- Executes N runs of a series of tests
+- Saves failed runs for later inspection
+- Runs tests in parallel.
 
-The first two items are actually quite easy to achieve with some simple bash scripting as the following snippet
+The first two items are actually quite easy to achieve with some simple bash scripting as the following snippet shows:
 
 ```bash
 #!/usr/bin/env bash
@@ -292,12 +292,14 @@ for i in $(seq 1 $2); do
 done
 ```
 
-However the concurrency property is significantly harder to achieve with bash scripting and this is where Python comes to the rescue once again. While Python has a quite complicated story for concurrency (specially when compared to Go), it does offer quite a simple API for concurrency through the `concurrent.futures` module. We can thus use it to run N tests in parallel, wait until one (or more) complete and assign new tests to the idle workers. Furthermore, when assigning new tasks, we can cycle through test types, as if we were running them sequentially in a cyclical way.
+However, the previous script will only run one test at a time. Running tests in parallel speeds things up significantly, and it also sometimes helps by introducing more concurrency, leading to rare interleavings to happen more frequently.
 
-Below is a snippet with the core functionality to achieve the desired behavior using Python. I've stripped the CLI parsing and UI updating parts, but the full `dstest` script that I wrote can be found [here](https://gist.github.com/JJGO/0d73540ef7cc2f066cb535156b7cbdab). `dstest --help` will give you an idea of how to use it, but it is up to you to modify it and tailor to your needs.
+Nevertheless, the concurrency property is significantly harder to achieve with bash scripting and this is where Python comes to the rescue once again. While Python has a quite complicated story for concurrency (specially when compared to Go), it does offer a pragmatic concurrency API through the `concurrent.futures` module. Thus, we can run N tests in parallel, wait until one (or more) complete and assign new tests to the idle workers. Furthermore, when assigning new tasks, we can cycle through test types, as if we were running them sequentially in a cyclical way.
+
+Below is a snippet with the core functionality to achieve the desired behavior using Python. I've stripped the CLI parsing and UI updating parts. The full `dstest` script that I wrote can be found [here](https://gist.github.com/JJGO/0d73540ef7cc2f066cb535156b7cbdab). `dstest --help` will give you an idea of how to use it, but it is up to you to modify it and tailor to your needs.
 
 ```python
-# [...] # Some boring imports
+# [...] Some boring imports
 
 # concurrent.futures requires tasks that are encapsulated in a function
 def run_test(test: str, race: bool):
@@ -341,18 +343,15 @@ with ThreadPoolExecutor(max_workers=workers) as executor:
 
             os.remove(path)
             completed += 1
-            total_progress.update(total_task, advance=1)
-
             futures = list(not_done)
 ```
 
 I dived into Rich again to get pretty looking progress bars and tables for the tests and I have to say that I'm quite happy with the result.
-
 This is how the script looks while it's executing, with failed tests and logs reported as they appear:
 
 ![](/assets/images/debugging-raft/progress.png)
 
-Once it's done, we get a report of how many failed runs there were and the mean runtime per test. In the example there seems to be a rare issue with snapshots and we now have a dozen logs to debug it.
+Once it's done, we get a report of how many failed runs there were and the mean runtime per test. In the example below, there seems to be a rare issue with snapshots and we now have a dozen logs to debug it.
 
 ![](/assets/images/debugging-raft/table.png)
 
@@ -362,15 +361,14 @@ I hope this overview was helpful and provided the background and illustrative ex
 
 ### Disclaimer: Truecolor Support
 
-I do have to make a disclaimer about the color support required for the log parser script. Feel free to skip this part but think of coming back if colors fail to print when you try running the previous snippet.
-Terminals support 8-bit colors by default in most cases. This 8-bit is for the whole color so you get 256 colors in total.
-However, most UI color palettes such as text editors, that support 8-bit for each channel, with a total of 24-bits leading to the common 16 million colors denomination.
+I do have to make a disclaimer about the color support required for the log parser script. Terminals support 8-bit colors by default in most cases. This 8-bit is for the whole color value so you get 256 colors in total.
+However, most UI color palettes such as text editors, support 8 bits for each channel, adding up to a total of 24-bits per color, leading to the common 16 million colors denomination.
 
-Rich has [names](https://rich.readthedocs.io/en/latest/appendix/colors.html) for all the 8-bit colors so you can use them inplace of the RGB codes I use if you stick with a 8-bit color palette.
+Rich has [names](https://rich.readthedocs.io/en/latest/appendix/colors.html) for all the 8-bit colors so you can use them instead of the RGB codes I use if you stick with a 8-bit color palette.
 On the other hand if you want to enable 24-bit color mode, you will want to search for **truecolor** support in your current tools.
-A large fraction of modern terminal tools do support the wider array of colors although sometimes it has to be manually enabled. Do note that for truecolor to work you need **all** moving pieces to support truecolor. This will vary from setup to setup but usually means:
+A large fraction of modern terminal tools do support the wider array of colors although sometimes it has to be manually enabled. Do note that for truecolor to work you need **all** moving pieces to support truecolor. This will vary from setup to setup, but usually means:
 
-- Your terminal emulator, i.e. the GUI app that lets you access the terminal (usually one of Terminal.app, iTerm, GNOME Terminal, kiTTY, alacritty, Windows Terminal, &c). Most modern terminals support truecolor but sometimes they require that you specify the `TERM` environment variable as `xterm-256color`.
-- Terminal multiplexers like `tmux` if you use one. Again, most likely supported but not the default behaviour. Adding a few lines to your `.tmux.conf` does the job.
+- Your terminal emulator, i.e. the GUI app that lets you access the terminal (usually one of Terminal.app, iTerm, GNOME Terminal, kitty, alacritty, Windows Terminal, &c). Most modern terminals support truecolor but sometimes they require that you specify the `TERM` environment variable as `xterm-256color`.
+- Terminal multiplexers like `tmux` if you use one. Again, most likely supported but not the default behavior. Adding a few lines to your `.tmux.conf` does the job.
 - Your remote client, if you are using one. This is usually `ssh` which in most cases should handle truecolor. If you use other options like [mosh](https://mosh.org/), [Eternal Terminal](https://eternalterminal.dev/) or ([PuTTY](https://www.putty.org/), you'll need to check.
 - If your vim/neovim is looking sad with only 256 colors you might also want to consider enabling truecolor there.
