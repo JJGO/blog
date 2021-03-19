@@ -257,6 +257,9 @@ S0 becomes candidate, S1 and S2 update terms vote for S0, leading to a majority.
 
 ![](/assets/images/debugging-raft/colored.png)
 
+
+Note, since some tests might produce thousands of lines of logs, it's a good idea to use some sort of pager strategy to quickly navigate them. I am a happy `tmux` user and that's what how I went about it. I do have in my `.tmux.conf` a history override (`set -g history-limit 100000`) so I have enough scrollback. Using `less` won't work because it'll mess with Rich ability to print colors and detect console width. You might try Rich's `console.pager()` contextmanager although from cursory exploration I had to wait until the whole output was there for pagination to start so YMMV.
+
 ### Capturing Rare Failures
 
 We now have a wonderful tool for examining logs. However logs for failed runs are sometimes hard to come by. What I'm referring to is the fact that as you progressively fix mistakes in your distributed system labs implementations, bugs will become rarer and it can become frustrating when all tests pass except for a specific one that only fails every fifty or hundred runs.
