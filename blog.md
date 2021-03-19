@@ -2,7 +2,7 @@
 layout: default
 title: Blog | Jose Javier Gonzalez Ortiz
 header: Blog
-description: Pseudorandom musings on programming, machine learning and puzzles
+description: Pseudorandom musings on programming, machine learning, research and puzzles
 permalink: /blog/
 ---
 

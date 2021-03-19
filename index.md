@@ -2,7 +2,7 @@
 layout: default
 title: Blog | Jose Javier Gonzalez Ortiz
 header: JJGO &>  Blog
-description: Random musings on programming, machine learning and computational puzzles
+description: Quasirandom musings on programming, machine learning and computational puzzles
 permalink: /
 ---
 
