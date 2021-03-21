@@ -188,18 +188,20 @@ width = console.size.width
 panic = False
 for line in input_:
     try:
-        time, topic, *msg = line.strip().split(" ")
+        # Assume format from Go output
+        time = int(line[:6])
+        topic = line[7:11]
+        msg = line[12:].strip()
         # To ignore some topics
         if topic not in topics:
             continue
 
-        msg = " ".join(msg)
-
         # Debug() calls from the test suite aren't associated with
         # any particular peer. Otherwise we can treat second column
         # as peer id
-        if topic != "TEST":
+        if topic != "TEST" and n_columns:
             i = int(msg[1])
+            msg = msg[3:]
 
         # Colorize output by using rich syntax when needed
         if colorize and topic in TOPICS:
@@ -227,7 +229,7 @@ for line in input_:
         # Output from tests is usually important so add a
         # horizontal line with hashes to make it more obvious
         if not panic:
-            print("#" * console.width)
+            print("-" * console.width)
         print(line, end="")
 ```
 
